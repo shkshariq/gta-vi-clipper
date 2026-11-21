@@ -39,7 +39,7 @@ start() {
     if curl -s -o /dev/null "$URL/login"; then echo "Admin UI started: $URL"; else
       echo "Admin UI did not start. Last log lines:"; tail -15 "$DESK/logs/admin.log"; exit 1; fi
   fi
-  [[ ${NO_OPEN:-} == 1 ]] || open "$URL"
+  [[ ${NO_OPEN:-} == 1 || $(uname) != Darwin ]] || open "$URL"
 }
 
 stop() {
@@ -50,11 +50,11 @@ stop() {
 
 stat_() {
   [[ -n $(ui_pid) ]] && echo "Admin UI : running  $URL" || echo "Admin UI : stopped  (./run.sh)"
-  if launchctl print "gui/$(id -u)/com.gtadesk.hourly" >/dev/null 2>&1; then
+  if launchctl print "gui/$(id -u)/com.gtadesk.hourly" >/dev/null 2>&1 || crontab -l 2>/dev/null | grep -q gtadesk-hourly; then
     "$PY" -c "import sys; sys.path.insert(0,'$REPO/scripts'); import deskdb as d; c=d.schedule_cfg(); print(f'Schedule : on   {c[\"from\"]}-{c[\"to\"]}, every {c[\"every\"]} min')"
   else echo "Schedule : off  (turn on in Settings)"; fi
   if [[ -d $DESK/state/hourly.lock ]]; then
-    echo "Run      : running since $(stat -f '%Sm' -t '%H:%M' "$DESK/state/hourly.lock")  ->  $(ls -t "$DESK"/logs/run-*.log 2>/dev/null | head -1)"
+    echo "Run      : running since $(date -r "$DESK/state/hourly.lock" +%H:%M)  ->  $(ls -t "$DESK"/logs/run-*.log 2>/dev/null | head -1)"
   else echo "Run      : idle"; fi
 }
 
@@ -72,10 +72,17 @@ log() {
 }
 
 setup() {
-  command -v brew >/dev/null || { echo "Install Homebrew first: https://brew.sh"; exit 1; }
-  for f in python@3.12 ffmpeg-full; do brew list "$f" >/dev/null 2>&1 || brew install "$f"; done
+  if [[ $(uname) == Darwin ]]; then
+    command -v brew >/dev/null || { echo "Install Homebrew first: https://brew.sh"; exit 1; }
+    for f in python@3.12 ffmpeg-full; do brew list "$f" >/dev/null 2>&1 || brew install "$f"; done
+    VPY="$(brew --prefix python@3.12)/bin/python3.12"
+  else
+    for c in python3 ffmpeg fc-list lsof sqlite3 curl crontab; do command -v $c >/dev/null || {
+      echo "Missing $c. Run: sudo apt install -y python3 python3-venv ffmpeg fonts-noto-core lsof sqlite3 curl cron"; exit 1; }; done
+    VPY=python3
+  fi
   command -v claude >/dev/null || echo "NOTE: Claude Code CLI not found. Install it, then log in once with: claude"
-  [[ -x $PY ]] || "$(brew --prefix python@3.12)/bin/python3.12" -m venv "$REPO/.venv"
+  [[ -x $PY ]] || "$VPY" -m venv "$REPO/.venv"
   "$PY" -m pip install -q --upgrade pip && "$PY" -m pip install -q -r "$REPO/requirements.txt"
   mkdir -p "$DESK/state" "$DESK/logs"
   if [[ ! -f $DESK/hourly.sh ]]; then

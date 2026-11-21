@@ -31,6 +31,8 @@ import rules as _rules  # language, font, speed, hashtags: edited on the admin U
 R = _rules.load()
 LANG = R["language_code"]
 FONT = R["font"]
+if sys.platform != "darwin" and FONT.endswith(" Sangam MN"):  # macOS-only font; Linux: apt install fonts-noto-core
+    FONT = "Noto Sans " + FONT[: -len(" Sangam MN")]
 FONT_DIRS = ["/System/Library/Fonts/Supplemental", "/Library/Fonts", str(Path.home() / "Library/Fonts")]
 FG_MAX_H = 1300
 HASHTAGS = R["hashtags_required"].split()

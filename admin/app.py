@@ -19,7 +19,7 @@ os.environ.setdefault("CLIP_DESK_HOME", str(REPO.parent / "desk"))
 import deskdb  # noqa: E402
 import rules  # noqa: E402
 
-DESK = Path(os.environ["CLIP_DESK_HOME"])
+DESK = Path(os.environ["CLIP_DESK_HOME"]).expanduser().resolve()
 PY = sys.executable
 LABEL = "com.gtadesk.hourly"
 PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
@@ -55,8 +55,31 @@ def same_origin_posts():
             abort(403)
 
 
+IS_MAC = sys.platform == "darwin"
+CRON_TAG = "# gtadesk-hourly"  # Linux: the schedule is the user's crontab lines carrying this tag
+
+
+def _crontab():
+    r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else ""
+
+
+def _crontab_write(lines):
+    return subprocess.run(["crontab", "-"], input="".join(l + "\n" for l in lines), capture_output=True, text=True)
+
+
 def schedule_on():
-    return subprocess.run(["launchctl", "print", f"gui/{UID}/{LABEL}"], capture_output=True).returncode == 0
+    if IS_MAC:
+        return subprocess.run(["launchctl", "print", f"gui/{UID}/{LABEL}"], capture_output=True).returncode == 0
+    return CRON_TAG in _crontab()
+
+
+def schedule_off():
+    if IS_MAC:
+        subprocess.run(["launchctl", "bootout", f"gui/{UID}/{LABEL}"], capture_output=True)
+        PLIST.unlink(missing_ok=True)
+    else:
+        _crontab_write([l for l in _crontab().splitlines() if CRON_TAG not in l])
 
 
 def hm(t):
@@ -80,7 +103,12 @@ def plist_xml():
 
 
 def schedule_load():
-    PLIST.parent.mkdir(parents=True, exist_ok=True); (DESK / "logs").mkdir(exist_ok=True)
+    (DESK / "logs").mkdir(exist_ok=True)
+    if not IS_MAC:
+        keep = [l for l in _crontab().splitlines() if CRON_TAG not in l]
+        job = f"/bin/zsh {DESK / 'hourly.sh'} >> {DESK / 'logs' / 'cron.log'} 2>&1 {CRON_TAG}"
+        return _crontab_write(keep + [f"{t % 60} {t // 60} * * * {job}" for t in deskdb.schedule_slots()])
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
     if schedule_on():
         subprocess.run(["launchctl", "bootout", f"gui/{UID}/{LABEL}"], capture_output=True)
     PLIST.write_text(plist_xml())
@@ -386,6 +414,9 @@ FONT_DIRS = ["/System/Library/Fonts", "/System/Library/Fonts/Supplemental", "/Li
 
 
 def font_found(name):
+    if not IS_MAC:  # fontconfig knows every installed family
+        r = subprocess.run(["fc-list", ":", "family"], capture_output=True, text=True)
+        return name.lower() in r.stdout.lower()
     return any(Path(d, name + ext).exists() for d in FONT_DIRS for ext in (".ttc", ".ttf", ".otf"))
 
 
@@ -444,8 +475,7 @@ def run_now():
 @login_required
 def schedule():
     if schedule_on():
-        subprocess.run(["launchctl", "bootout", f"gui/{UID}/{LABEL}"], capture_output=True)
-        PLIST.unlink(missing_ok=True)
+        schedule_off()
         deskdb.event("schedule", "schedule turned OFF"); flash("Schedule turned off.")
     else:
         r = schedule_load()
