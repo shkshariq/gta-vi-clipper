@@ -1,5 +1,6 @@
 # Clip desk in Docker:  ./run.sh docker up   (or: docker compose up -d --build)
-# Admin UI: http://127.0.0.1:8765 on the server only (use an SSH tunnel from your laptop).
+# Admin UI: http://<server-ip>:8765 (open port 8765 in the server firewall). First login needs the setup code
+# shown by ./run.sh docker status.
 # Data (database, logs, jobs, done.txt) lives in ./data on the host. Claude login lives in the claude-config volume.
 x-desk: &desk
   build:
@@ -27,7 +28,7 @@ services:
     <<: *desk
     command: ["python", "/app/admin/app.py"]
     ports:
-      - "127.0.0.1:${DESK_PORT:-8765}:8765"
+      - "${DESK_PORT:-8765}:8765"
 
   scheduler:
     <<: *desk

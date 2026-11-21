@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the GTA 6 clip desk.
-#   ./run.sh            start the admin UI (background) and open it        -> http://127.0.0.1:8765
+#   ./run.sh            start the admin UI (background) and open it        -> http://<host>:8765
 #   ./run.sh stop       stop the admin UI
 #   ./run.sh restart    restart the admin UI (after code changes)
 #   ./run.sh status     admin UI, schedule, current run
@@ -19,7 +19,8 @@ set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESK="${CLIP_DESK_HOME:-$(dirname "$REPO")/desk}"
 PORT="${DESK_PORT:-8765}"
-URL="http://127.0.0.1:$PORT"
+if [[ $(uname) == Darwin ]]; then HOSTIP=127.0.0.1; else HOSTIP=$(hostname -I 2>/dev/null | awk '{print $1}'); fi
+URL="http://${HOSTIP:-<server-ip>}:$PORT"
 PY="$REPO/.venv/bin/python"
 export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$REPO/.venv/bin:/opt/homebrew/bin:$PATH" CLIP_DESK_HOME="$DESK"
 
@@ -42,8 +43,8 @@ start() {
   else
     mkdir -p "$DESK/logs"
     nohup "$PY" "$REPO/admin/app.py" >> "$DESK/logs/admin.log" 2>&1 &
-    for i in {1..20}; do curl -s -o /dev/null "$URL/login" && break; sleep 0.3; done
-    if curl -s -o /dev/null "$URL/login"; then echo "Admin UI started: $URL"; else
+    for i in {1..20}; do curl -s -o /dev/null "http://127.0.0.1:$PORT/login" && break; sleep 0.3; done
+    if curl -s -o /dev/null "http://127.0.0.1:$PORT/login"; then echo "Admin UI started: $URL"; else
       echo "Admin UI did not start. Last log lines:"; tail -15 "$DESK/logs/admin.log"; exit 1; fi
   fi
   [[ ${NO_OPEN:-} == 1 || $(uname) != Darwin ]] || open "$URL"
@@ -100,6 +101,13 @@ setup() {
   echo "Setup done. Next: ./run.sh  -> create the admin login, then Settings: Telegram + Scheduler, and LLM rules."
 }
 
+setup_code() {  # shown until the first admin account exists
+  local code
+  code=$(docker compose exec -T admin python -c "import sys; sys.path.insert(0,'/app/scripts'); import deskdb as d; print(d.get('setup_code') or '')" 2>/dev/null)
+  [[ -n $code ]] && echo "Setup code: $code   (needed once, to create the admin account on first visit)"
+  return 0
+}
+
 dk() {
   command -v docker >/dev/null || { echo "Docker not found. Install: https://docs.docker.com/engine/install/"; exit 1; }
   cd "$REPO"; mkdir -p data
@@ -107,7 +115,9 @@ dk() {
   local D="$REPO/data"
   dc() { docker compose "$@"; }
   case "${1:-status}" in
-    up)      dc up -d --build && echo "Admin UI: $URL (on this server; from your laptop: ssh -L $PORT:127.0.0.1:$PORT <server>)" ;;
+    up)      dc up -d --build || exit 1
+             echo "Admin UI: $URL  (use the server's public IP if this is a cloud server; open port $PORT in its firewall)"
+             sleep 5; setup_code ;;
     down)    dc down ;;
     restart) dc up -d --build --force-recreate ;;
     login)   echo "Log in with the link Claude shows, then type /exit."; dc run --rm --no-deps admin claude ;;
@@ -118,7 +128,7 @@ dk() {
     log)     local f=$(ls -t "$D"/logs/run-*.log 2>/dev/null | head -1)
              [[ -n $f ]] || { echo "No run logs yet."; exit 1; }
              echo "== $f (Ctrl+C stops watching; the run keeps going)"; tail -n 40 -f "$f" ;;
-    status)  dc ps
+    status)  dc ps; echo "Admin UI : $URL"; setup_code
              dc exec -T admin python -c "import sys; sys.path.insert(0,'/app/scripts'); import deskdb as d; c=d.schedule_cfg(); print('Schedule :', 'on ' if d.get('schedule_enabled')=='1' else 'off', f\"{c['from']}-{c['to']}, every {c['every']} min\")" 2>/dev/null
              [[ -d $D/state/hourly.lock ]] && echo "Run      : running since $(date -r "$D/state/hourly.lock" +%H:%M)" || echo "Run      : idle" ;;
     *)       grep -E '^#   \./run\.sh docker' "$REPO/run.sh" | sed 's/^# //'; exit 1 ;;

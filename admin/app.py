@@ -1,10 +1,12 @@
 """Clip desk admin: runs, clips (Tamil transcript + post pack), Telegram log, settings, schedule.
 
-    CLIP_DESK_HOME=~/Workspace/personal/gta-vi/desk python admin/app.py      -> http://127.0.0.1:8765
+    CLIP_DESK_HOME=~/Workspace/personal/gta-vi/desk python admin/app.py      -> http://<host>:8765
 
-Local only (binds 127.0.0.1). First visit asks you to create the admin account.
+Binds DESK_HOST (default 127.0.0.1; Docker: 0.0.0.0 = reachable on the server's IP). The first admin account can only
+be created with the one-time setup code printed in the log (docker logs / ./run.sh docker status). Wrong logins are
+rate-limited per IP.
 """
-import os, secrets, subprocess, sys
+import hmac, os, secrets, subprocess, sys, time
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -189,29 +191,59 @@ STATUS = """{% macro st(s) %}<span class="tag {{ {'ok':'ok','sent':'ok','running
 
 # ---------- auth ----------
 
+FAILS = {}  # ip -> recent failed login times
+MAX_FAILS, FAIL_WINDOW = 5, 15 * 60
+
+
+def setup_code():
+    """One-time code needed to create the first admin (so a stranger cannot claim a fresh server)."""
+    if q("SELECT COUNT(*) n FROM admin", one=True)["n"]:
+        return None
+    code = deskdb.get("setup_code")
+    if not code:
+        code = secrets.token_hex(4).upper(); deskdb.put("setup_code", code)
+    return code
+
+
+def throttled(ip):
+    now = time.time()
+    FAILS[ip] = [t for t in FAILS.get(ip, []) if now - t < FAIL_WINDOW]
+    return len(FAILS[ip]) >= MAX_FAILS
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     first = q("SELECT COUNT(*) n FROM admin", one=True)["n"] == 0
+    ip = request.remote_addr or "?"
+    if request.method == "POST" and throttled(ip):
+        flash("Too many wrong attempts. Wait 15 minutes."); return redirect(url_for("login"))
     if request.method == "POST":
         u, p = request.form.get("username", "").strip(), request.form.get("password", "")
         if first:
-            if len(u) < 3 or len(p) < 8:
+            if not hmac.compare_digest(request.form.get("code", "").strip().upper(), setup_code() or "-"):
+                FAILS.setdefault(ip, []).append(time.time())
+                flash("Wrong setup code. It is in the server log: ./run.sh docker status")
+            elif len(u) < 3 or len(p) < 8:
                 flash("Username needs 3+ characters, password 8+.")
             else:
                 with deskdb.connect() as c:
                     c.execute("INSERT INTO admin(username,password_hash) VALUES(?,?)", (u, generate_password_hash(p)))
+                deskdb.put("setup_code", "")
                 session["user"] = u; deskdb.event("admin", f"admin account '{u}' created")
                 return redirect(url_for("home"))
         else:
             r = q("SELECT * FROM admin WHERE username=?", (u,), one=True)
             if r and check_password_hash(r["password_hash"], p):
-                session["user"] = u
+                FAILS.pop(ip, None); session.clear(); session["user"] = u
                 return redirect(url_for("home"))
+            FAILS.setdefault(ip, []).append(time.time())
+            deskdb.event("admin", f"failed login for '{u[:40]}' from {ip}")
             flash("Wrong username or password.")
     return page("""<div class="card" style="max-width:380px;margin:60px auto">
 <h2 style="margin-top:0">{{ 'Create admin account' if first else 'Log in' }}</h2>
-{% if first %}<p class="mut">First visit: choose the admin username and password.</p>{% endif %}
-<form method="post"><label>Username</label><input name="username" autofocus required>
+{% if first %}<p class="mut">First visit: enter the setup code from the server log
+(<code>./run.sh docker status</code>), then choose the admin username and password.</p>{% endif %}
+<form method="post">{% if first %}<label>Setup code</label><input name="code" autocomplete="off" required>{% endif %}<label>Username</label><input name="username" autofocus required>
 <label>Password</label><input name="password" type="password" required><br><br><button>{{ 'Create' if first else 'Log in' }}</button></form></div>""", first=first)
 
 
@@ -510,4 +542,13 @@ def retry(cid):
 
 
 if __name__ == "__main__":
-    app.run(host=os.environ.get("DESK_HOST", "127.0.0.1"), port=int(os.environ.get("DESK_PORT", 8765)), debug=False)
+    host, port = os.environ.get("DESK_HOST", "127.0.0.1"), int(os.environ.get("DESK_PORT", 8765))
+    code = setup_code()
+    if code:
+        print(f"*** First visit: create the admin account with setup code {code} ***", flush=True)
+    try:
+        from waitress import serve  # production server (Flask's built-in one is for development)
+        print(f"Clip desk admin on http://{host}:{port}", flush=True)
+        serve(app, host=host, port=port, threads=8)
+    except ImportError:
+        app.run(host=host, port=port, debug=False)
