@@ -1,10 +1,10 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Commit everything and push to github.com/shkshariq/gta-vi-clipper (ssh profile: github-personal).
 #   ./push.sh "what changed"        (message optional)
 # Before committing: copies the live desk/hourly.sh into desk-template/, and refuses to push if a
 # Telegram bot token or a database/log file is about to be committed.
 set -eu
-cd "${0:A:h}"
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
 DESK="${CLIP_DESK_HOME:-$HOME/Workspace/personal/gta-vi/desk}"
 [[ -f "$DESK/hourly.sh" ]] && cp "$DESK/hourly.sh" desk-template/hourly.sh

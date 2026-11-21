@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Run the GTA 6 clip desk.
 #   ./run.sh            start the admin UI (background) and open it        -> http://127.0.0.1:8765
 #   ./run.sh stop       stop the admin UI
@@ -16,8 +16,8 @@
 #   ./run.sh docker shell    shell inside the admin container
 # The schedule (From/To/Every), Telegram and LLM rules are set in the admin UI.
 set -u
-REPO="${0:A:h}"
-DESK="${CLIP_DESK_HOME:-${REPO:h}/desk}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DESK="${CLIP_DESK_HOME:-$(dirname "$REPO")/desk}"
 PORT="${DESK_PORT:-8765}"
 URL="http://127.0.0.1:$PORT"
 PY="$REPO/.venv/bin/python"
@@ -84,8 +84,8 @@ setup() {
     for f in python@3.12 ffmpeg-full; do brew list "$f" >/dev/null 2>&1 || brew install "$f"; done
     VPY="$(brew --prefix python@3.12)/bin/python3.12"
   else
-    for c in python3 ffmpeg fc-list lsof sqlite3 curl crontab; do command -v $c >/dev/null || {
-      echo "Missing $c. Run: sudo apt install -y python3 python3-venv ffmpeg fonts-noto-core lsof sqlite3 curl cron"; exit 1; }; done
+    for c in zsh python3 ffmpeg fc-list lsof sqlite3 curl crontab; do command -v $c >/dev/null || {
+      echo "Missing $c. Run: sudo apt install -y zsh python3 python3-venv ffmpeg fonts-noto-core lsof sqlite3 curl cron"; exit 1; }; done
     VPY=python3
   fi
   command -v claude >/dev/null || echo "NOTE: Claude Code CLI not found. Install it, then log in once with: claude"
@@ -104,21 +104,22 @@ dk() {
   command -v docker >/dev/null || { echo "Docker not found. Install: https://docs.docker.com/engine/install/"; exit 1; }
   cd "$REPO"; mkdir -p data
   export DESK_UID=$(id -u) DESK_GID=$(id -g)
-  local D="$REPO/data" c="docker compose"
+  local D="$REPO/data"
+  dc() { docker compose "$@"; }
   case "${1:-status}" in
-    up)      $c up -d --build && echo "Admin UI: $URL (on this server; from your laptop: ssh -L $PORT:127.0.0.1:$PORT <server>)" ;;
-    down)    $c down ;;
-    restart) $c up -d --build --force-recreate ;;
-    login)   echo "Log in with the link Claude shows, then type /exit."; $c run --rm --no-deps admin claude ;;
-    shell)   $c exec admin zsh ;;
-    logs)    $c logs -f --tail 50 ;;
+    up)      dc up -d --build && echo "Admin UI: $URL (on this server; from your laptop: ssh -L $PORT:127.0.0.1:$PORT <server>)" ;;
+    down)    dc down ;;
+    restart) dc up -d --build --force-recreate ;;
+    login)   echo "Log in with the link Claude shows, then type /exit."; dc run --rm --no-deps admin claude ;;
+    shell)   dc exec admin zsh ;;
+    logs)    dc logs -f --tail 50 ;;
     now)     [[ -d $D/state/hourly.lock ]] && { echo "A run is already going. ./run.sh docker log to watch it."; exit 1; }
-             $c exec -d -e DESK_TRIGGER=manual admin /bin/zsh /data/desk/hourly.sh && sleep 3 && echo "Run started. ./run.sh docker log to watch." ;;
+             dc exec -d -e DESK_TRIGGER=manual admin /bin/zsh /data/desk/hourly.sh && sleep 3 && echo "Run started. ./run.sh docker log to watch." ;;
     log)     local f=$(ls -t "$D"/logs/run-*.log 2>/dev/null | head -1)
              [[ -n $f ]] || { echo "No run logs yet."; exit 1; }
              echo "== $f (Ctrl+C stops watching; the run keeps going)"; tail -n 40 -f "$f" ;;
-    status)  $c ps
-             $c exec -T admin python -c "import sys; sys.path.insert(0,'/app/scripts'); import deskdb as d; c=d.schedule_cfg(); print('Schedule :', 'on ' if d.get('schedule_enabled')=='1' else 'off', f\"{c['from']}-{c['to']}, every {c['every']} min\")" 2>/dev/null
+    status)  dc ps
+             dc exec -T admin python -c "import sys; sys.path.insert(0,'/app/scripts'); import deskdb as d; c=d.schedule_cfg(); print('Schedule :', 'on ' if d.get('schedule_enabled')=='1' else 'off', f\"{c['from']}-{c['to']}, every {c['every']} min\")" 2>/dev/null
              [[ -d $D/state/hourly.lock ]] && echo "Run      : running since $(date -r "$D/state/hourly.lock" +%H:%M)" || echo "Run      : idle" ;;
     *)       grep -E '^#   \./run\.sh docker' "$REPO/run.sh" | sed 's/^# //'; exit 1 ;;
   esac
