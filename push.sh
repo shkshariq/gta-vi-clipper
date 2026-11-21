@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # Commit everything and push to github.com/shkshariq/gta-vi-clipper (ssh profile: github-personal).
 #   ./push.sh "what changed"        (message optional)
-# Before committing: copies the live desk/hourly.sh into desk-template/, and refuses to push if a
-# Telegram bot token or a database/log file is about to be committed.
+# Refuses to push if a Telegram bot token or a database/log file is about to be committed.
+# desk-template/hourly.sh is the source of truth for the run script (Docker copies it in on start).
 set -eu
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-DESK="${CLIP_DESK_HOME:-$HOME/Workspace/personal/gta-vi/desk}"
-[[ -f "$DESK/hourly.sh" ]] && cp "$DESK/hourly.sh" desk-template/hourly.sh
 
 git remote get-url origin | grep -q "github-personal:shkshariq/gta-vi-clipper" \
   || git remote set-url origin git@github-personal:shkshariq/gta-vi-clipper.git

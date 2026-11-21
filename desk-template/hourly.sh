@@ -7,7 +7,7 @@ set -u
 DESK="$HOME/Workspace/personal/gta-vi/desk"
 REPO="$HOME/Workspace/personal/gta-vi/repo"
 S="$REPO/scripts"
-export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$REPO/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$REPO/.venv/bin:/opt/homebrew/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export CLIP_DESK_HOME="$DESK"
 cd "$DESK" || exit 1
 mkdir -p state logs

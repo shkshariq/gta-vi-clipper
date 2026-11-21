@@ -24,6 +24,9 @@ RUN python -m venv /app/.venv && /app/.venv/bin/pip install --no-cache-dir -q --
 
 # Claude Code CLI -> ~/.local/bin/claude (on hourly.sh's PATH); login is kept in the claude-config volume
 RUN curl -fsSL https://claude.ai/install.sh | bash
+USER root
+RUN ln -sf "$(getent passwd ${UID} | cut -d: -f6)/.local/bin/claude" /usr/local/bin/claude && claude --version
+USER desk
 ENV PATH="/app/.venv/bin:/home/desk/.local/bin:${PATH}"
 
 COPY --chown=${UID}:${GID} . /app
