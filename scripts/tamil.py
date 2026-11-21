@@ -75,7 +75,7 @@ def layout(src_w, src_h, crop, ass):
     v = (f"[0:v]crop={pw}:{ph}:{even(src_w * cx)}:{even(src_h * cy)},setsar=1,split[a][b];"
          f"[a]scale=-2:{H},crop={W}:{H},boxblur=24:2,eq=brightness=-0.08[bg];"
          f"[b]scale={fg_w}:{fg_h}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2-80[v];"
-         f"[v]fps=30,subtitles='{sub}'{fd}[vo]")
+         f"[v]fps=30,ass='{sub}':shaping=complex{fd}[vo]")  # complex = HarfBuzz; Debian's default mis-orders Tamil vowel signs
     return v, cap_y
 
 

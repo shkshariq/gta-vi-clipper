@@ -56,6 +56,8 @@ def same_origin_posts():
 
 
 IS_MAC = sys.platform == "darwin"
+# launchd (Mac) / cron (Linux) / loop (Docker: scripts/scheduler.py reads schedule_enabled from the DB)
+SCHED_MODE = os.environ.get("DESK_SCHEDULER") or ("launchd" if IS_MAC else "cron")
 CRON_TAG = "# gtadesk-hourly"  # Linux: the schedule is the user's crontab lines carrying this tag
 
 
@@ -68,14 +70,22 @@ def _crontab_write(lines):
     return subprocess.run(["crontab", "-"], input="".join(l + "\n" for l in lines), capture_output=True, text=True)
 
 
+class _Ok:
+    returncode, stderr = 0, ""
+
+
 def schedule_on():
-    if IS_MAC:
+    if SCHED_MODE == "loop":
+        return deskdb.get("schedule_enabled") == "1"
+    if SCHED_MODE == "launchd":
         return subprocess.run(["launchctl", "print", f"gui/{UID}/{LABEL}"], capture_output=True).returncode == 0
     return CRON_TAG in _crontab()
 
 
 def schedule_off():
-    if IS_MAC:
+    if SCHED_MODE == "loop":
+        deskdb.put("schedule_enabled", "0")
+    elif SCHED_MODE == "launchd":
         subprocess.run(["launchctl", "bootout", f"gui/{UID}/{LABEL}"], capture_output=True)
         PLIST.unlink(missing_ok=True)
     else:
@@ -104,7 +114,9 @@ def plist_xml():
 
 def schedule_load():
     (DESK / "logs").mkdir(exist_ok=True)
-    if not IS_MAC:
+    if SCHED_MODE == "loop":
+        deskdb.put("schedule_enabled", "1"); return _Ok()
+    if SCHED_MODE == "cron":
         keep = [l for l in _crontab().splitlines() if CRON_TAG not in l]
         job = f"/bin/zsh {DESK / 'hourly.sh'} >> {DESK / 'logs' / 'cron.log'} 2>&1 {CRON_TAG}"
         return _crontab_write(keep + [f"{t % 60} {t // 60} * * * {job}" for t in deskdb.schedule_slots()])
@@ -498,4 +510,4 @@ def retry(cid):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.environ.get("DESK_PORT", 8765)), debug=False)
+    app.run(host=os.environ.get("DESK_HOST", "127.0.0.1"), port=int(os.environ.get("DESK_PORT", 8765)), debug=False)

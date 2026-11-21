@@ -7,6 +7,13 @@
 #   ./run.sh now        start one clip run right away (same as "Run now" in the UI)
 #   ./run.sh log        follow the latest run log live
 #   ./run.sh setup      first-time setup: tools, Python venv, desk folder
+#
+# Docker (server): everything runs in containers, data in ./data
+#   ./run.sh docker up       build + start admin UI and scheduler     ./run.sh docker login   log in to Claude once
+#   ./run.sh docker status   containers, schedule, current run        ./run.sh docker now     start one run
+#   ./run.sh docker log      follow the latest run log                ./run.sh docker logs    container logs
+#   ./run.sh docker restart  rebuild + restart (after git pull)       ./run.sh docker down    stop everything
+#   ./run.sh docker shell    shell inside the admin container
 # The schedule (From/To/Every), Telegram and LLM rules are set in the admin UI.
 set -u
 REPO="${0:A:h}"
@@ -93,8 +100,33 @@ setup() {
   echo "Setup done. Next: ./run.sh  -> create the admin login, then Settings: Telegram + Scheduler, and LLM rules."
 }
 
+dk() {
+  command -v docker >/dev/null || { echo "Docker not found. Install: https://docs.docker.com/engine/install/"; exit 1; }
+  cd "$REPO"; mkdir -p data
+  export DESK_UID=$(id -u) DESK_GID=$(id -g)
+  local D="$REPO/data" c="docker compose"
+  case "${1:-status}" in
+    up)      $c up -d --build && echo "Admin UI: $URL (on this server; from your laptop: ssh -L $PORT:127.0.0.1:$PORT <server>)" ;;
+    down)    $c down ;;
+    restart) $c up -d --build --force-recreate ;;
+    login)   echo "Log in with the link Claude shows, then type /exit."; $c run --rm --no-deps admin claude ;;
+    shell)   $c exec admin zsh ;;
+    logs)    $c logs -f --tail 50 ;;
+    now)     [[ -d $D/state/hourly.lock ]] && { echo "A run is already going. ./run.sh docker log to watch it."; exit 1; }
+             $c exec -d -e DESK_TRIGGER=manual admin /bin/zsh /data/desk/hourly.sh && sleep 3 && echo "Run started. ./run.sh docker log to watch." ;;
+    log)     local f=$(ls -t "$D"/logs/run-*.log 2>/dev/null | head -1)
+             [[ -n $f ]] || { echo "No run logs yet."; exit 1; }
+             echo "== $f (Ctrl+C stops watching; the run keeps going)"; tail -n 40 -f "$f" ;;
+    status)  $c ps
+             $c exec -T admin python -c "import sys; sys.path.insert(0,'/app/scripts'); import deskdb as d; c=d.schedule_cfg(); print('Schedule :', 'on ' if d.get('schedule_enabled')=='1' else 'off', f\"{c['from']}-{c['to']}, every {c['every']} min\")" 2>/dev/null
+             [[ -d $D/state/hourly.lock ]] && echo "Run      : running since $(date -r "$D/state/hourly.lock" +%H:%M)" || echo "Run      : idle" ;;
+    *)       grep -E '^#   \./run\.sh docker' "$REPO/run.sh" | sed 's/^# //'; exit 1 ;;
+  esac
+}
+
 case "${1:-start}" in
+  docker) shift; dk "$@"; exit ;;
   start) start ;; stop) stop ;; restart) stop; sleep 1; start ;; status) stat_ ;;
   now|run) now ;; log|logs) log ;; setup) setup ;;
-  *) sed -n '2,10p' "$0"; exit 1 ;;
+  *) grep -E '^#   \./run\.sh' "$REPO/run.sh" | sed 's/^# //'; exit 1 ;;
 esac

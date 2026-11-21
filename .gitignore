@@ -13,3 +13,5 @@ test/
 logs/
 state/
 .DS_Store
+data/
+.env

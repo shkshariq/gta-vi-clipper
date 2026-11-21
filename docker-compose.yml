@@ -1,0 +1,37 @@
+# Clip desk in Docker:  ./run.sh docker up   (or: docker compose up -d --build)
+# Admin UI: http://127.0.0.1:8765 on the server only (use an SSH tunnel from your laptop).
+# Data (database, logs, jobs, done.txt) lives in ./data on the host. Claude login lives in the claude-config volume.
+x-desk: &desk
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+    args:
+      UID: ${DESK_UID:-1000}
+      GID: ${DESK_GID:-1000}
+  image: gta-vi-clipper:latest
+  restart: unless-stopped
+  environment:
+    TZ: ${TZ:-Asia/Dubai}
+    DESK_PORT: "8765"   # inside the container; the host port is set under ports
+  # optional .env next to this file: CLAUDE_CODE_OAUTH_TOKEN=... (from `claude setup-token`) instead of
+  # `./run.sh docker login`; also TZ, DESK_PORT, DESK_UID/DESK_GID
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - ./data:/data/desk
+    - claude-config:/home/desk/.claude-config
+
+services:
+  admin:
+    <<: *desk
+    command: ["python", "/app/admin/app.py"]
+    ports:
+      - "127.0.0.1:${DESK_PORT:-8765}:8765"
+
+  scheduler:
+    <<: *desk
+    command: ["python", "/app/scripts/scheduler.py"]
+
+volumes:
+  claude-config:

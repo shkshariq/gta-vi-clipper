@@ -1,0 +1,10 @@
+.git
+.venv
+data
+jobs
+test
+**/__pycache__
+*.mp4
+*.wav
+.DS_Store
+.env
