@@ -15,6 +15,9 @@
 
 </div>
 
+> **Tamil clip desk (this fork):** face-free clips with a Tamil hook + post pack to Telegram, admin UI, scheduler,
+> Docker. **How to run it: [RUN.md](RUN.md)**
+
 ```
 /plugin marketplace add Bodila51/gtavi-claudecode
 /plugin install gtavi-claudecode@gtavi-claudecode
