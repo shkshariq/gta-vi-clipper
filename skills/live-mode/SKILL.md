@@ -19,7 +19,7 @@ Before starting:
 While it runs:
 
 1. Check new clips in `jobs/` every few minutes. Review each one: pick the best, skip spoilers and nudity.
-2. For each keeper, run `hook-writer` then `clip-cutter` (or use the auto-cut if the script produced one), then `rule-check`.
+2. For each keeper, run `hook-writer` then `tamil-voiceover` (default for this page), then `rule-check`.
 3. Send the human one message with the best 1 to 3 clips (caption, credit, file path). They say "yes" and post. Speed matters, so keep it to one message.
 
 When done: list what was recorded, what was clipped, and log the posts via `learning-loop`. Ask the streamer for permission when they are reachable.

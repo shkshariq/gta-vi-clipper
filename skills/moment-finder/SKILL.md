@@ -16,6 +16,6 @@ Then:
 1. Read `jobs/<id>/candidates.md` and show each candidate: number, start-end, length, why it scored, transcript line.
 2. Drop spoilers for story moments in launch week, nudity, and anything that looks like a leak.
 3. Recommend the best 3 and say what hook angle each suggests.
-4. Next step: `clip-cutter` with `--pick <n>`.
+4. Next step: `tamil-voiceover` with `--pick <n>` (this page's default: no streamer face, Tamil captions, the human's own voice-over). Use `clip-cutter` only if the human asks for another layout.
 
 Record the source link and creator in `media/raw` notes. Credit the creator in the post caption.

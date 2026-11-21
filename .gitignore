@@ -6,3 +6,10 @@ test/
 *.wav
 *.ts
 !docs/*.mp4
+# runtime state of the desk (secrets: Telegram token, admin password hash)
+*.db
+*.db-shm
+*.db-wal
+logs/
+state/
+.DS_Store

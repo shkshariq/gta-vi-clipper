@@ -11,7 +11,7 @@ description: Run the daily GTA 6 page routine from the full playbook. Use when t
 4. Run the day:
    - Official sources first (section 5). Record each verified fact with its link in `facts.md`.
    - Find material: `trend-radar`, `stream-finder`, `campaign-finder`.
-   - Cut clips: `moment-finder`, then `clip-cutter`, with hooks from `hook-writer`.
+   - Cut clips: `moment-finder`, then `tamil-voiceover` (default), with hooks from `hook-writer`.
    - Gate every clip with `rule-check`.
    - Log and learn with `learning-loop`.
 5. Send the human ONE message with the exact caption, media path and credit for each post. They reply "yes" to approve. They post it themselves or schedule it. Never auto-upload.

@@ -4,7 +4,10 @@ Signals per second: loudness spikes, YouTube "most replayed" heatmap, live-chat 
 (YouTube VOD chat replay or a TwitchDownloader chat.json) and hype words in the transcript.
 Writes jobs/<id>/candidates.md + candidates.json.
 
-usage: python moments.py <url-or-file> [--top 8] [--min 15] [--max 40] [--chat chat.json] [--max-minutes 90]
+usage: python moments.py <url-or-file> [--top 8] [--min 15] [--max 40] [--chat chat.json] [--max-minutes 90] [--start-minute 0]
+
+--start-minute skips the start of a long stream/VOD (intros, waiting screens): only minutes
+[start, start+max-minutes] are downloaded; heatmap and chat timings are shifted to match.
 """
 import argparse, json, math, re, sys, wave
 from pathlib import Path
@@ -16,7 +19,7 @@ HYPE = re.compile(r"\b(no way|oh my god|omg|what|wait|bro|let'?s go|holy|insane|
 CHAT_HYPE = re.compile(r"(LMAO|LOL|KEKW|OMEGALUL|W+\b|CLIP|💀|😂|🔥|NO WAY|HOLY)", re.I)
 
 
-def fetch(src, d, max_min):
+def fetch(src, d, max_min, start_min=0):
     info = {}
     if is_url(src):
         info = ytdlp_json(src)
@@ -26,8 +29,8 @@ def fetch(src, d, max_min):
         if not vid.exists():
             args = ytdlp_base() + ["-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]/b", "--merge-output-format", "mp4",
                                    "-o", str(vid)]
-            if (info.get("duration") or 0) > max_min * 60:
-                args += ["--download-sections", f"*0-{max_min * 60}"]
+            if start_min > 0 or (info.get("duration") or 0) > max_min * 60:
+                args += ["--download-sections", f"*{start_min * 60}-{(start_min + max_min) * 60}"]
             run(args + [src])
         if info.get("was_live") and not (d / "chat.json").exists():  # YouTube chat replay
             run(ytdlp_base() + ["--skip-download", "--write-subs", "--sub-langs", "live_chat", "-o", str(d / "chat"), src], check=False)
@@ -62,19 +65,24 @@ def transcribe(wav, d):
         pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768
 
     def run_on(device):
-        model = WhisperModel("small", device=device, compute_type="float16" if device == "cuda" else "int8")
+        import os
+        model = WhisperModel("small", device=device, compute_type="int8" if device == "cpu" else "float16",
+                             cpu_threads=os.cpu_count() or 4)
         segs, _ = model.transcribe(pcm, word_timestamps=True, vad_filter=True)
         return [{"w": w.word.strip(), "s": round(w.start, 2), "e": round(w.end, 2)} for s in segs for w in (s.words or [])]
-    try:
-        words = run_on("cuda" if cuda else "cpu")
-    except RuntimeError as e:  # GPU present but CUDA libraries missing: fall back to CPU
-        print(f"GPU transcription unavailable ({str(e)[:80]}), using CPU")
-        words = run_on("cpu")
+    import platform
+    devices = (["cuda"] if cuda else []) + (["mps"] if sys.platform == "darwin" and platform.machine() == "arm64" else []) + ["cpu"]
+    for dev in devices:  # NVIDIA GPU, then Apple Silicon GPU (about 3x faster than CPU on M-series), then CPU
+        try:
+            words = run_on(dev)
+            break
+        except (RuntimeError, ValueError) as e:
+            print(f"{dev} transcription unavailable ({str(e)[:80]}), trying next device")
     save_json(out, words)
     return words
 
 
-def chat_series(d, n, chat_arg, info):
+def chat_series(d, n, chat_arg, info, off=0):
     """Messages per second from YouTube live_chat json lines or a TwitchDownloader chat.json."""
     c = np.zeros(n)
     yt = list(d.glob("chat*.live_chat.json"))
@@ -82,7 +90,7 @@ def chat_series(d, n, chat_arg, info):
         for line in yt[0].read_text(encoding="utf-8", errors="ignore").splitlines():
             try:
                 a = json.loads(line)["replayChatItemAction"]
-                t = int(a["videoOffsetTimeMsec"]) / 1000
+                t = int(a["videoOffsetTimeMsec"]) / 1000 - off
                 txt = json.dumps(a["actions"], ensure_ascii=False)
             except Exception:
                 continue
@@ -91,7 +99,7 @@ def chat_series(d, n, chat_arg, info):
     elif chat_arg:
         js = load_json(chat_arg)
         for m in js.get("comments", []):
-            t = m.get("content_offset_seconds", 0)
+            t = m.get("content_offset_seconds", 0) - off
             body = (m.get("message") or {}).get("body", "")
             if 0 <= t < n:
                 c[int(t)] += 2 if CHAT_HYPE.search(body) else 1
@@ -115,9 +123,11 @@ def main():
     ap.add_argument("src"); ap.add_argument("--top", type=int, default=8)
     ap.add_argument("--min", type=float, default=15); ap.add_argument("--max", type=float, default=40)
     ap.add_argument("--chat"); ap.add_argument("--max-minutes", type=int, default=90)
+    ap.add_argument("--start-minute", type=int, default=0, help="skip this many minutes at the start of a long video")
     a = ap.parse_args()
     d = job_dir(a.src)
-    vid, info = fetch(a.src, d, a.max_minutes)
+    vid, info = fetch(a.src, d, a.max_minutes, a.start_minute)
+    off = a.start_minute * 60
     dur = float(ffprobe(vid)["format"]["duration"])
     wav, db = audio_rms(vid, d)
     n = len(db)
@@ -131,8 +141,10 @@ def main():
     hype = smooth(hype, 5)
     heat = np.zeros(n)
     for h in (info.get("heatmap") or []):
-        heat[int(h["start_time"]):int(math.ceil(h["end_time"]))] = h["value"]
-    chat = chat_series(d, n, a.chat, info)
+        hs, he = int(h["start_time"]) - off, int(math.ceil(h["end_time"])) - off
+        if he > 0 and hs < n:
+            heat[max(0, hs):min(n, he)] = h["value"]
+    chat = chat_series(d, n, a.chat, info, off)
     chatz = smooth(np.clip(z(smooth(chat, 10)), 0, None), 3)
     w_heat = 2.0 if heat.any() else 0
     w_chat = 1.5 if chat.any() else 0
